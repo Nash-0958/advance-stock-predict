@@ -1,0 +1,261 @@
+Report: Real-Time Stock Price Scraping, Analysis, and Forecasting
+This report details the methodology for preprocessing stock price data, analyzing it using machine learning models, and visualizing the results. The workflow encompasses data cleaning, feature scaling, model training, and forecasting. The Python script provided employs various libraries, including Pandas, NumPy, Scikit-learn, and TensorFlow/Keras, to achieve these goals.
+
+1. Importing Required Modules
+
+import os
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.preprocessing.sequence import TimeseriesGenerator
+from tensorflow.keras.callbacks import EarlyStopping
+
+Explanation:
+
+os: Handles file and directory operations.
+pandas (pd): Facilitates data manipulation and analysis.
+numpy (np): Supports array operations and mathematical functions.
+seaborn (sns): For statistical data visualization.
+matplotlib.pyplot (plt): Creates static, animated, and interactive visualizations.
+sklearn: Provides tools for machine learning, including preprocessing, model selection, and evaluation.
+tensorflow.keras: Offers components for building and training neural networks, particularly LSTM models.
+
+2. Directory Creation for Output
+
+# Create a directory to store images
+output_folder = 'stock_visualizations'
+os.makedirs(output_folder, exist_ok=True)
+
+Explanation:
+
+Creates a directory named stock_visualizations to store all generated plots and visualizations.
+
+3. Data Loading and Preprocessing
+
+# Load and preprocess the CSV file
+df = pd.read_csv('MA-Equities-CM-volume-27-Jul-2024.csv')
+df.columns = df.columns.str.strip().str.replace('\n', '').str.replace(' ', '_')
+
+def clean_column(df, column_name, numeric_format=False):
+    if numeric_format:
+        df[column_name] = df[column_name].replace({'-': np.nan}, regex=True)
+        df[column_name] = df[column_name].replace({',': ''}, regex=True)  # Remove commas
+    df[column_name] = pd.to_numeric(df[column_name], errors='coerce')
+
+Explanation:
+
+Data Loading: Reads the CSV file containing stock data.
+Column Cleaning: Strips unwanted characters and spaces from column names.
+clean_column Function: Cleans numeric columns by handling missing values and formatting issues.
+
+# Clean numeric columns
+clean_column(df, '%CHNG')
+clean_column(df, 'VALUE', numeric_format=True)
+clean_column(df, 'VOLUME_(Shares)', numeric_format=True)
+
+# Drop rows with NaN values
+df.dropna(subset=['%CHNG', 'VALUE', 'VOLUME_(Shares)'], inplace=True)
+
+# Drop or encode non-numeric columns
+stock_names = df['SYMBOL'].unique() if 'SYMBOL' in df.columns else ['Unknown Stock']
+df.drop(columns=['SYMBOL'], inplace=True, errors='ignore')
+non_numeric_columns = df.select_dtypes(include=[object]).columns
+
+for col in non_numeric_columns:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col].astype(str))
+
+Explanation:
+
+Cleaning Numeric Columns: Handles missing values and numeric formatting.
+Dropping NaNs: Removes rows with missing values in critical columns.
+Encoding Non-Numeric Columns: Converts categorical text data into numeric format using Label Encoding.
+
+4. Feature Scaling and Model Preparation
+
+# Scaling numerical features
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(df.drop('%CHNG', axis=1))
+X = pd.DataFrame(scaled_features, columns=df.columns.difference(['%CHNG']))
+y = df['%CHNG']
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+Explanation:
+
+Feature Scaling: Normalizes features to improve model performance.
+Train-Test Split: Divides data into training and testing sets for model evaluation.
+
+5. Random Forest Regressor Training
+
+# Random Forest Regressor with Grid Search
+param_grid = {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20, 30]}
+grid_search = GridSearchCV(estimator=RandomForestRegressor(random_state=42), param_grid=param_grid, cv=3, n_jobs=-1, verbose=2)
+grid_search.fit(X_train, y_train)
+best_rf_model = grid_search.best_estimator_
+
+y_pred = best_rf_model.predict(X_test)
+print(f"\nStock: {stock_names[0]}")
+print("Best Random Forest Mean Squared Error:", mean_squared_error(y_test, y_pred))
+print("Best Random Forest R^2 Score:", r2_score(y_test, y_pred))
+
+Explanation:
+
+Grid Search: Finds the best hyperparameters for the Random Forest model.
+Model Evaluation: Displays performance metrics of the best model.
+
+6. Data Visualization
+
+# Visualizations
+sns.pairplot(df.select_dtypes(include=[float, int]))
+plt.savefig(os.path.join(output_folder, 'pairplot.png'))
+plt.close()
+
+plt.figure(figsize=(10, 8))
+sns.heatmap(df.select_dtypes(include=[float, int]).corr(), annot=True, cmap='coolwarm', fmt='.2f')
+plt.title('Correlation Heatmap')
+plt.savefig(os.path.join(output_folder, 'heatmap.png'))
+plt.close()
+
+Explanation:
+
+Pairplot: Visualizes pairwise relationships in the dataset.
+Correlation Heatmap: Shows the correlation between numerical features.
+
+7. Time Series Cross-Validation and LSTM Model Training
+
+# Time series cross-validator
+tscv = TimeSeriesSplit(n_splits=3)  # Adjust the number of splits based on data size
+
+# Initialize lists to store history and validation losses
+history_list = []
+val_losses = []
+
+# Define early stopping callback
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+for fold, (train_index, val_index) in enumerate(tscv.split(data)):
+    print(f"\nFold {fold + 1}:")
+
+    train_data, val_data = data[train_index], data[val_index]
+
+    # Check if the adjusted sequence_length is valid
+    if len(train_data) <= sequence_length or len(val_data) <= sequence_length:
+        print(f"Skipping fold {fold + 1} due to insufficient data.")
+        continue  # Skip this fold if sequence_length is not valid
+
+    # Create TimeseriesGenerators
+    train_generator = TimeseriesGenerator(train_data, train_data, length=sequence_length, batch_size=1)
+    val_generator = TimeseriesGenerator(val_data, val_data, length=sequence_length, batch_size=1)
+
+    print(f"Train generator size: {len(train_generator)}")
+    print(f"Validation generator size: {len(val_generator)}")
+
+    # Define and compile the LSTM model
+    lstm_model = Sequential()
+    lstm_model.add(LSTM(50, activation='relu', input_shape=(sequence_length, 1)))
+    lstm_model.add(Dense(1))
+    lstm_model.compile(optimizer='adam', loss='mse')
+
+    # Train the LSTM model
+    print("Starting model training...")
+    history = lstm_model.fit(train_generator, epochs=20, validation_data=val_generator, callbacks=[early_stopping], verbose=1)
+
+    # Store training history and validation loss
+    history_list.append(history.history)
+    val_losses.append(history.history['val_loss'][-1])
+
+    # Print final loss values
+    print(f"Final training loss for fold {fold + 1}: {history.history['loss'][-1]}")
+    print(f"Final validation loss for fold {fold + 1}: {history.history['val_loss'][-1]}")
+
+# Print average validation loss across folds, if any folds were processed
+if val_losses:
+    average_val_loss = np.mean(val_losses)
+    print(f"\nAverage validation loss across folds: {average_val_loss}")
+else:
+    print("\nNo valid folds processed.")
+
+Explanation:
+
+TimeSeriesSplit: Splits data into training and validation sets for time series analysis.
+LSTM Model: Defines and trains the LSTM model for time series forecasting.
+Early Stopping: Prevents overfitting by halting training when validation loss stops improving.
+
+8. Plot Training and Validation Losses
+
+# Plot training and validation losses, if any history was collected
+if history_list:
+    plt.figure(figsize=(12, 6))
+    for fold, hist in enumerate(history_list):
+        plt.plot(hist['loss'], label=f'Train Loss Fold {fold + 1}')
+        plt.plot(hist['val_loss'], label=f'Val Loss Fold {fold + 1}')
+
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.savefig(os.path.join(output_folder, 'training_validation_loss.png'))
+    plt.close()
+else:
+    print("No training history to plot.")
+
+Explanation:
+
+Plotting Losses: Visualizes the training and validation losses for each fold to assess model performance.
+
+9. Predict Future Values
+
+# Predict future values using the best model
+future_steps = 5  # Define how many future steps to predict
+
+for stock_name in stock_names:
+    # Prepare the data for prediction
+    last_sequence = data[-sequence_length:]  # Last sequence of data to base future predictions on
+
+    # Create TimeseriesGenerators for future predictions
+    future_data = np.concatenate([data, np.zeros((future_steps, 1))])  # Extend data to hold future steps
+    future_generator = TimeseriesGenerator(future_data, future_data, length=sequence_length, batch_size=1)
+
+    # Predict future values
+    predictions = []
+    for i in range(future_steps):
+        pred = lstm_model.predict(future_generator)[-1, 0]
+        predictions.append(pred)
+        # Append the prediction to the future_data for the next prediction
+        future_data = np.concatenate([future_data, np.array([[pred]])])
+        future_generator = TimeseriesGenerator(future_data, future_data, length=sequence_length, batch_size=1)
+
+    # Plot current and future predicted values
+    plt.figure(figsize=(12, 6))
+    plt.plot(np.arange(len(data)), data, label='Historical Data')
+    plt.plot(np.arange(len(data), len(data) + future_steps), predictions, label='Future Predictions', linestyle='--')
+    plt.xlabel('Time Steps')
+    plt.ylabel('% Change')
+    plt.title(f'{stock_name} - Historical and Future Predictions')
+    plt.legend()
+    plt.savefig(os.path.join(output_folder, f'{stock_name}_wave_graph.png'))
+    plt.close()
+
+    # Print current and predicted future values
+    print(f"\nCurrent stock price change for {stock_name}: {data[-1, 0]:.2f}%")
+    print("Predicted future stock price changes:")
+    for i, pred in enumerate(predictions, start=1):
+        print(f"Day {i}: {pred:.2f}%")
+
+Explanation:
+
+Future Prediction: Uses the trained LSTM model to predict future values based on the latest data.
+Plotting Future Predictions: Visualizes both historical and predicted future stock price changes.
+Printing Predictions: Summarizes predicted future values.
+
+Summary
+This report provides a thorough guide to preprocessing stock data, training machine learning models, and visualizing results. A Random Forest model is used for initial predictions, while an LSTM model handles time-series forecasting for future stock price changes. The provided visualizations and metrics aid in evaluating model performance and ensuring accurate forecasting.
